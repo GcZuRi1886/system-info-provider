@@ -119,17 +119,30 @@ func handleClient(conn net.Conn) {
 func getInitialStates(conn net.Conn, infoType string) {
 
 	switch infoType {
-		case "BLUETOOTH":
-			// Initial emit of current bluetooth state
-			var bluetoothDataWrapper = initBluetoothDataWrapper()
-			loadInitialBluezState(bluetoothDataWrapper.Data.(*types.BluetoothInfo))
-			msg, err := marshalData(bluetoothDataWrapper)
+	case "BLUETOOTH":
+		// Initial emit of current bluetooth state
+		var bluetoothDataWrapper = initBluetoothDataWrapper()
+		loadInitialBluezState(bluetoothDataWrapper.Data.(*types.BluetoothInfo))
+		msg, err := marshalData(bluetoothDataWrapper)
+		if err == nil {
+			writeToConn(conn, msg)
+		}
+	case "WORKSPACE", "HYPRLAND":
+		// Initial emit of current workspace state (compositor-agnostic)
+		provider := NewWorkspaceProvider()
+		if provider != nil {
+			state, err := provider.GetWorkspaceState()
 			if err == nil {
-				writeToConn(conn, msg)
+				wrapper := types.Wrapper{
+					Type: "workspace",
+					Data: state,
+				}
+				msg, err := marshalData(wrapper)
+				if err == nil {
+					writeToConn(conn, msg)
+				}
 			}
-		case "HYPRLAND":
-			// Initial emit of current hyprland workspace state
-			getWorkspaceState(broadcast)
+		}
 	}
 }
 

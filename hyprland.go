@@ -14,10 +14,20 @@ import (
 	"github.com/GcZuRi1886/system-info-provider/types"
 )
 
-var workspaceInfoWrapper types.Wrapper
-var workspaceInfo types.WorkspaceInfo
+// HyprlandProvider implements WorkspaceProvider for Hyprland
+type HyprlandProvider struct{}
 
-func openHyprlandSocket(sockName string) (net.Conn, error) {
+// NewHyprlandProvider creates a new Hyprland workspace provider
+func NewHyprlandProvider() *HyprlandProvider {
+	return &HyprlandProvider{}
+}
+
+// Name returns the compositor name
+func (h *HyprlandProvider) Name() string {
+	return "hyprland"
+}
+
+func (h *HyprlandProvider) openSocket(sockName string) (net.Conn, error) {
 	sig := os.Getenv("HYPRLAND_INSTANCE_SIGNATURE")
 	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
 	sock := filepath.Join(runtimeDir, "hypr", sig, sockName)
@@ -30,18 +40,12 @@ func openHyprlandSocket(sockName string) (net.Conn, error) {
 	return conn, nil
 }
 
-
-// ---- listen and update workspace state over hyprland socket ----
-func openHyprlandCommandSocket() (net.Conn, error) {
-	conn, err := openHyprlandSocket(".socket.sock")
-	if err != nil {
-		return nil, err
-	}
-	return conn, nil
+func (h *HyprlandProvider) openCommandSocket() (net.Conn, error) {
+	return h.openSocket(".socket.sock")
 }
 
-func sendHyprlandCommand(cmd string) ([]byte, error) {
-	conn, err := openHyprlandCommandSocket()
+func (h *HyprlandProvider) sendCommand(cmd string) ([]byte, error) {
+	conn, err := h.openCommandSocket()
 	if err != nil {
 		return nil, err
 	}
@@ -57,52 +61,48 @@ func sendHyprlandCommand(cmd string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return buf[:n], nil
 }
 
-// ----- get current workspace info -----
-func getWorkspaceState(emit func(dataType string, data any)) {
-	println("Fetching workspace state...")
-
-	out, err := sendHyprlandCommand("j/monitors")
+// GetWorkspaceState retrieves the current workspace state from Hyprland
+func (h *HyprlandProvider) GetWorkspaceState() (*types.WorkspaceInfo, error) {
+	out, err := h.sendCommand("j/monitors")
 	if err != nil {
-		log.Printf("Error getting monitors: %v", err)
-		return
+		return nil, fmt.Errorf("error getting monitors: %v", err)
 	}
-	current := readHyprlandWorkspaceCurrent(out)
+	current := h.parseWorkspaceCurrent(out)
 
-	out2, err := sendHyprlandCommand("j/workspaces")
+	out2, err := h.sendCommand("j/workspaces")
 	if err != nil {
-		log.Printf("Error getting workspaces: %v", err)
-		return
+		return nil, fmt.Errorf("error getting workspaces: %v", err)
 	}
-	ids := readHyprlandWorkspaceIDs(out2)
+	ids := h.parseWorkspaceIDs(out2)
 
-	workspaceInfo.Current = current
-	workspaceInfo.List = ids
-
-	emit(workspaceInfoWrapper.Type, workspaceInfoWrapper)
+	return &types.WorkspaceInfo{
+		Current: current,
+		List:    ids,
+	}, nil
 }
 
-func readHyprlandWorkspaceIDs(workspacesJSON []byte) []int {
-	var wokspaces []types.Workspace
-	
-	if err := json.Unmarshal(workspacesJSON, &wokspaces); err != nil {
+func (h *HyprlandProvider) parseWorkspaceIDs(workspacesJSON []byte) []int {
+	var workspaces []types.Workspace
+
+	if err := json.Unmarshal(workspacesJSON, &workspaces); err != nil {
 		return nil
 	}
-	
+
 	var ids []int
-	for _, ws := range wokspaces {
+	for _, ws := range workspaces {
 		ids = append(ids, ws.ID)
 	}
 	slices.Sort(ids)
 	return ids
 }
 
-func readHyprlandWorkspaceCurrent(workspacesJSON []byte) int {
+func (h *HyprlandProvider) parseWorkspaceCurrent(monitorsJSON []byte) int {
 	var monitors []types.Monitor
-	if err := json.Unmarshal(workspacesJSON, &monitors); err != nil {
+	if err := json.Unmarshal(monitorsJSON, &monitors); err != nil {
 		return 0
 	}
 
@@ -113,16 +113,26 @@ func readHyprlandWorkspaceCurrent(workspacesJSON []byte) int {
 	return monitors[0].ActiveWorkspace.ID
 }
 
+// Listen starts listening for workspace events from Hyprland
+func (h *HyprlandProvider) Listen(emit func(dataType string, data any)) {
+	wrapper := types.Wrapper{
+		Type: "workspace",
+	}
 
-// ----- listen to hyprland socket -----
-func listenHyprlandEventSocket(emit func(dataType string, data any)) {
-	workspaceInfoWrapper.Type = "hyprland"
-	workspaceInfoWrapper.Data = &workspaceInfo
+	// Get initial state
+	state, err := h.GetWorkspaceState()
+	if err != nil {
+		log.Printf("Error getting initial Hyprland workspace state: %v", err)
+	} else {
+		wrapper.Data = state
+		emit(wrapper.Type, wrapper)
+	}
 
-	// get initial state
-	getWorkspaceState(emit)
-
-	f, _ := openHyprlandSocket(".socket2.sock")
+	f, err := h.openSocket(".socket2.sock")
+	if err != nil {
+		log.Printf("Error opening Hyprland event socket: %v", err)
+		return
+	}
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
@@ -131,8 +141,19 @@ func listenHyprlandEventSocket(emit func(dataType string, data any)) {
 		if strings.HasPrefix(line, "workspace>>") ||
 			strings.HasPrefix(line, "createworkspace>>") ||
 			strings.HasPrefix(line, "destroyworkspace>>") {
-			getWorkspaceState(emit)
+			state, err := h.GetWorkspaceState()
+			if err != nil {
+				log.Printf("Error getting Hyprland workspace state: %v", err)
+				continue
+			}
+			wrapper.Data = state
+			emit(wrapper.Type, wrapper)
 		}
 	}
 }
 
+// Legacy function for backwards compatibility - wraps the provider
+func listenHyprlandEventSocket(emit func(dataType string, data any)) {
+	provider := NewHyprlandProvider()
+	provider.Listen(emit)
+}
