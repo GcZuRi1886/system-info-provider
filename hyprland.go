@@ -67,11 +67,11 @@ func (h *HyprlandProvider) sendCommand(cmd string) ([]byte, error) {
 
 // GetWorkspaceState retrieves the current workspace state from Hyprland
 func (h *HyprlandProvider) GetWorkspaceState() (*types.WorkspaceInfo, error) {
-	out, err := h.sendCommand("j/monitors")
+	out, err := h.sendCommand("j/activeworkspace")
 	if err != nil {
-		return nil, fmt.Errorf("error getting monitors: %v", err)
+		return nil, fmt.Errorf("error getting active workspace: %v", err)
 	}
-	current := h.parseWorkspaceCurrent(out)
+	current := h.parseActiveWorkspace(out)
 
 	out2, err := h.sendCommand("j/workspaces")
 	if err != nil {
@@ -100,17 +100,12 @@ func (h *HyprlandProvider) parseWorkspaceIDs(workspacesJSON []byte) []int {
 	return ids
 }
 
-func (h *HyprlandProvider) parseWorkspaceCurrent(monitorsJSON []byte) int {
-	var monitors []types.Monitor
-	if err := json.Unmarshal(monitorsJSON, &monitors); err != nil {
+func (h *HyprlandProvider) parseActiveWorkspace(workspaceJSON []byte) int {
+	var workspace types.Workspace
+	if err := json.Unmarshal(workspaceJSON, &workspace); err != nil {
 		return 0
 	}
-
-	if len(monitors) == 0 {
-		return 0
-	}
-
-	return monitors[0].ActiveWorkspace.ID
+	return workspace.ID
 }
 
 // Listen starts listening for workspace events from Hyprland
@@ -140,7 +135,8 @@ func (h *HyprlandProvider) Listen(emit func(dataType string, data any)) {
 		line := scanner.Text()
 		if strings.HasPrefix(line, "workspace>>") ||
 			strings.HasPrefix(line, "createworkspace>>") ||
-			strings.HasPrefix(line, "destroyworkspace>>") {
+			strings.HasPrefix(line, "destroyworkspace>>") ||
+			strings.HasPrefix(line, "focusedmon>>") {
 			state, err := h.GetWorkspaceState()
 			if err != nil {
 				log.Printf("Error getting Hyprland workspace state: %v", err)
