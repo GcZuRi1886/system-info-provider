@@ -79,9 +79,16 @@ func (h *HyprlandProvider) GetWorkspaceState() (*types.WorkspaceInfo, error) {
 	}
 	ids := h.parseWorkspaceIDs(out2)
 
+	out3, err := h.sendCommand("j/monitors")
+	if err != nil {
+		return nil, fmt.Errorf("error getting monitors: %v", err)
+	}
+	focusedMonitor := h.parseFocusedMonitor(out3)
+
 	return &types.WorkspaceInfo{
-		Current: current,
-		List:    ids,
+		Current:        current,
+		List:           ids,
+		FocusedMonitor: focusedMonitor,
 	}, nil
 }
 
@@ -106,6 +113,19 @@ func (h *HyprlandProvider) parseActiveWorkspace(workspaceJSON []byte) int {
 		return 0
 	}
 	return workspace.ID
+}
+
+func (h *HyprlandProvider) parseFocusedMonitor(monitorsJSON []byte) string {
+	var monitors []types.HyprlandMonitor
+	if err := json.Unmarshal(monitorsJSON, &monitors); err != nil {
+		return ""
+	}
+	for _, mon := range monitors {
+		if mon.Focused {
+			return mon.Name
+		}
+	}
+	return ""
 }
 
 // Listen starts listening for workspace events from Hyprland

@@ -49,8 +49,9 @@ func (m *MangoProvider) parseTagOutput(output string) (*types.WorkspaceInfo, err
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 
 	info := &types.WorkspaceInfo{
-		Current: 1,
-		List:    []int{},
+		Current:        1,
+		List:           []int{},
+		FocusedMonitor: "",
 	}
 
 	for _, line := range lines {
@@ -69,6 +70,9 @@ func (m *MangoProvider) parseTagOutput(output string) (*types.WorkspaceInfo, err
 				activeMask, err2 := strconv.Atoi(fields[3])
 
 				if err1 == nil && err2 == nil {
+					// The monitor name is the first field
+					info.FocusedMonitor = fields[0]
+
 					// Parse occupied tags from bitmask
 					for i := 0; i < 32; i++ {
 						if occupiedMask&(1<<i) != 0 {
