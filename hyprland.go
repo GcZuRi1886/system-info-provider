@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -56,13 +57,13 @@ func (h *HyprlandProvider) sendCommand(cmd string) ([]byte, error) {
 		return nil, err
 	}
 
-	buf := make([]byte, 4096)
-	n, err := conn.Read(buf)
+	// Read the entire response - Hyprland sends all data then closes the connection
+	data, err := io.ReadAll(conn)
 	if err != nil {
 		return nil, err
 	}
 
-	return buf[:n], nil
+	return data, nil
 }
 
 // GetWorkspaceState retrieves the current workspace state from Hyprland
