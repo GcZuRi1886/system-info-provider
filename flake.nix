@@ -28,6 +28,15 @@
             pkgs.gopls
             pkgs.go-tools
           ];
+
+          shellHook = ''
+            export GOPATH=$PWD
+            export PATH=$GOPATH/bin:$PATH
+
+            echo "Welcome to the Go development environment for system-info-provider!"
+
+            exec zsh
+            '';
         };
       }
     );

@@ -100,6 +100,89 @@ func dbmToPercent(dbm int) int {
 	return 2 * (dbm + 100)
 }
 
+// isVPNInterface checks if an interface is a VPN interface based on its name and type
+func isVPNInterface(ifaceName string) (bool, string) {
+	// Check for common VPN interface name patterns
+	vpnPatterns := map[string]string{
+		"tun":      "openvpn",
+		"tap":      "openvpn",
+		"wg":       "wireguard",
+		"proton":   "protonvpn",
+		"nordlynx": "nordvpn",
+		"mullvad":  "mullvad",
+		"ppp":      "pptp",
+	}
+
+	for prefix, vpnType := range vpnPatterns {
+		if strings.HasPrefix(ifaceName, prefix) {
+			return true, vpnType
+		}
+	}
+
+	// Check if it's a WireGuard interface by looking for the wireguard sysfs directory
+	wgPath := filepath.Join("/sys/class/net", ifaceName, "device", "uevent")
+	if data, err := os.ReadFile(wgPath); err == nil {
+		if strings.Contains(string(data), "wireguard") {
+			return true, "wireguard"
+		}
+	}
+
+	// Check for TUN/TAP device type
+	tunFlagsPath := filepath.Join("/sys/class/net", ifaceName, "tun_flags")
+	if _, err := os.Stat(tunFlagsPath); err == nil {
+		return true, "tun"
+	}
+
+	return false, ""
+}
+
+// getVPNInfo scans all active interfaces and returns VPN connection info
+func getVPNInfo() types.VPNInfo {
+	interfaces, err := getAllActiveInterfaces()
+	if err != nil {
+		return types.VPNInfo{IsConnected: false}
+	}
+
+	for _, iface := range interfaces {
+		if isVPN, vpnType := isVPNInterface(iface.Name); isVPN {
+			// Get a friendly name from the interface if possible
+			name := getVPNName(iface.Name, vpnType)
+			return types.VPNInfo{
+				IsConnected: true,
+				Name:        name,
+				Interface:   iface.Name,
+				Type:        vpnType,
+			}
+		}
+	}
+
+	return types.VPNInfo{IsConnected: false}
+}
+
+// getVPNName tries to determine a friendly name for the VPN connection
+func getVPNName(ifaceName, vpnType string) string {
+	// For WireGuard, the interface name is often the config name
+	if vpnType == "wireguard" {
+		return ifaceName
+	}
+
+	// For known VPN providers, return their name
+	knownProviders := map[string]string{
+		"proton":   "ProtonVPN",
+		"nordlynx": "NordVPN",
+		"mullvad":  "Mullvad",
+	}
+
+	for prefix, name := range knownProviders {
+		if strings.HasPrefix(ifaceName, prefix) {
+			return name
+		}
+	}
+
+	// Default to the VPN type
+	return vpnType
+}
+
 func isConnected(iface string) bool {
 	data, err := os.ReadFile(filepath.Join("/sys/class/net", iface, "operstate"))
 	if err != nil {
@@ -162,6 +245,7 @@ func getNetworkInfo() (*types.NetworkInfo, error) {
 		IsConnected: isConnected(iface.Name),
 		BytesRecv:   c.BytesRecv,
 		BytesSent:   c.BytesSent,
+		VPN:         getVPNInfo(),
 	}
 
 	if info.IsWifi {
