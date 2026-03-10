@@ -120,7 +120,7 @@ func isVPNInterface(ifaceName string) (bool, string) {
 	}
 
 	// Check if it's a WireGuard interface by looking for the wireguard sysfs directory
-	wgPath := filepath.Join("/sys/class/net", ifaceName, "device", "uevent")
+	wgPath := filepath.Join("/sys/class/net", ifaceName, "uevent")
 	if data, err := os.ReadFile(wgPath); err == nil {
 		if strings.Contains(string(data), "wireguard") {
 			return true, "wireguard"
