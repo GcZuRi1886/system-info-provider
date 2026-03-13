@@ -100,6 +100,30 @@ func dbmToPercent(dbm int) int {
 	return 2 * (dbm + 100)
 }
 
+// isVirtualInterface returns true for virtual/container network interfaces that
+// should not be considered as a primary network connection (e.g. Docker/Podman
+// bridges, veth pairs, dummy interfaces, etc.).
+func isVirtualInterface(name string) bool {
+	virtualPrefixes := []string{
+		"br-",    // Docker/Podman named bridge networks
+		"docker", // docker0 default bridge
+		"podman", // podman0 default bridge
+		"veth",   // virtual ethernet pairs (container side)
+		"virbr",  // libvirt/KVM bridges
+		"vnet",   // libvirt virtual NICs
+		"dummy",  // dummy interfaces
+		"lxcbr",  // LXC bridges
+		"lxdbr",  // LXD bridges
+		"vxlan",  // VXLAN overlay interfaces
+	}
+	for _, prefix := range virtualPrefixes {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // isVPNInterface checks if an interface is a VPN interface based on its name and type
 func isVPNInterface(ifaceName string) (bool, string) {
 	// Check for common VPN interface name patterns
@@ -197,9 +221,9 @@ func findPrimaryInterface() (net.Interface, string, error) {
 		return net.Interface{}, "", err
 	}
 
-	// First pass: prioritize wired (non-WiFi) interfaces
+	// First pass: prioritize wired (non-WiFi, non-virtual) interfaces
 	for _, iface := range active {
-		if isWifiInterface(iface.Name) {
+		if isWifiInterface(iface.Name) || isVirtualInterface(iface.Name) {
 			continue
 		}
 		ip := getIPAddress(iface)
@@ -208,8 +232,11 @@ func findPrimaryInterface() (net.Interface, string, error) {
 		}
 	}
 
-	// Second pass: fall back to WiFi interfaces
+	// Second pass: fall back to WiFi interfaces (still excluding virtual)
 	for _, iface := range active {
+		if isVirtualInterface(iface.Name) {
+			continue
+		}
 		ip := getIPAddress(iface)
 		if ip != "" {
 			return iface, ip, nil
