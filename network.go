@@ -128,13 +128,14 @@ func isVirtualInterface(name string) bool {
 func isVPNInterface(ifaceName string) (bool, string) {
 	// Check for common VPN interface name patterns
 	vpnPatterns := map[string]string{
-		"tun":      "openvpn",
-		"tap":      "openvpn",
-		"wg":       "wireguard",
-		"proton":   "protonvpn",
-		"nordlynx": "nordvpn",
-		"mullvad":  "mullvad",
-		"ppp":      "pptp",
+		"tun":       "openvpn",
+		"tap":       "openvpn",
+		"wg":        "wireguard",
+		"tailscale": "tailscale",
+		"proton":    "protonvpn",
+		"nordlynx":  "nordvpn",
+		"mullvad":   "mullvad",
+		"ppp":       "pptp",
 	}
 
 	for prefix, vpnType := range vpnPatterns {
@@ -160,6 +161,32 @@ func isVPNInterface(ifaceName string) (bool, string) {
 	return false, ""
 }
 
+// hasRoutableIP checks if an interface has a routable (non-link-local) IP address
+func hasRoutableIP(iface net.Interface) bool {
+	addrs, err := iface.Addrs()
+	if err != nil {
+		return false
+	}
+
+	for _, addr := range addrs {
+		ipNet, ok := addr.(*net.IPNet)
+		if !ok {
+			continue
+		}
+
+		ip := ipNet.IP
+		// Skip loopback and link-local addresses
+		if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+			continue
+		}
+
+		// Found a routable IP (either IPv4 or IPv6)
+		return true
+	}
+
+	return false
+}
+
 // getVPNInfo scans all active interfaces and returns VPN connection info
 func getVPNInfo() types.VPNInfo {
 	interfaces, err := getAllActiveInterfaces()
@@ -169,6 +196,13 @@ func getVPNInfo() types.VPNInfo {
 
 	for _, iface := range interfaces {
 		if isVPN, vpnType := isVPNInterface(iface.Name); isVPN {
+			// Check if the VPN interface has a routable IP address
+			// This prevents false positives from interfaces that are up but not connected
+			// (e.g., Tailscale interface that's up but not connected to the tailnet)
+			if !hasRoutableIP(iface) {
+				continue
+			}
+
 			// Get a friendly name from the interface if possible
 			name := getVPNName(iface.Name, vpnType)
 			return types.VPNInfo{
@@ -185,22 +219,23 @@ func getVPNInfo() types.VPNInfo {
 
 // getVPNName tries to determine a friendly name for the VPN connection
 func getVPNName(ifaceName, vpnType string) string {
-	// For WireGuard, the interface name is often the config name
-	if vpnType == "wireguard" {
-		return ifaceName
-	}
-
 	// For known VPN providers, return their name
 	knownProviders := map[string]string{
-		"proton":   "ProtonVPN",
-		"nordlynx": "NordVPN",
-		"mullvad":  "Mullvad",
+		"tailscale": "Tailscale",
+		"proton":    "ProtonVPN",
+		"nordlynx":  "NordVPN",
+		"mullvad":   "Mullvad",
 	}
 
 	for prefix, name := range knownProviders {
 		if strings.HasPrefix(ifaceName, prefix) {
 			return name
 		}
+	}
+
+	// For WireGuard, the interface name is often the config name
+	if vpnType == "wireguard" {
+		return ifaceName
 	}
 
 	// Default to the VPN type
