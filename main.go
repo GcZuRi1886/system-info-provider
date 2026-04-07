@@ -7,10 +7,19 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 )
 
-var socketPath = "/tmp/system-info-provider.sock"
+func getSocketPath() string {
+	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
+	if runtimeDir == "" {
+		runtimeDir = fmt.Sprintf("/run/user/%d", os.Getuid())
+	}
+	return filepath.Join(runtimeDir, "system-info-provider.sock")
+}
+
+var socketPath = getSocketPath()
 
 // ----- emitToConsole updates to stdout -----
 func emitToConsole(dataType string, data any) {

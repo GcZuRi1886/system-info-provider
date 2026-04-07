@@ -66,8 +66,10 @@ Start socket server:
 
 The socket server listens on:
 ```
-/tmp/system-info-provider.sock
+$XDG_RUNTIME_DIR/system-info-provider.sock
 ```
+
+Typically this resolves to `/run/user/$UID/system-info-provider.sock`.
 
 Clients can subscribe by sending lines like:
 ```
