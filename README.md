@@ -46,6 +46,7 @@ Supported `data_type` values:
 - `workspace` — compositor workspace state (Hyprland or Mango WC)
 - `hyprland` — legacy alias for `workspace`
 - `bluetooth` — BlueZ adapter + device state
+- `brightness` — current screen brightness level
 - `socket` — start the Unix socket server and broadcast all streams
 
 ### Examples
@@ -76,6 +77,7 @@ Clients can subscribe by sending lines like:
 SUB SYSTEM
 SUB WORKSPACE
 SUB BLUETOOTH
+SUB BRIGHTNESS
 ```
 
 Upon subscribing, the client receives an initial state snapshot immediately, then live updates as they occur.
@@ -154,6 +156,18 @@ In stdout mode, each update overwrites the previous line (carriage return). In s
         "adapter": "/org/bluez/hci0"
       }
     }
+  }
+}
+```
+
+### `brightness` payload
+```json
+{
+  "type": "brightness",
+  "data": {
+    "current": 800,
+    "max": 1200,
+    "percentage": 0.667
   }
 }
 ```

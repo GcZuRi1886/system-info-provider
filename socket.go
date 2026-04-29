@@ -143,6 +143,10 @@ func getInitialStates(conn net.Conn, infoType string) {
 				}
 			}
 		}
+	case "BRIGHTNESS":
+		if current, err := readBrightnessInt("/sys/class/backlight"); err == nil {
+			_ = current
+		}
 	}
 }
 
