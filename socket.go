@@ -112,8 +112,35 @@ func handleClient(conn net.Conn) {
 			continue
 		}
 
+		// Example: "CMD MEDIA play-pause" or "CMD MEDIA seek 42.5"
+		if strings.ToUpper(parts[0]) == "CMD" {
+			conn.Write([]byte(handleCommand(cmd) + "\n"))
+			continue
+		}
+
 		conn.Write([]byte("ERROR unknown command\n"))
 	}
+}
+
+// handleCommand runs a "CMD <TYPE> <action> [arg]" line and returns the reply
+func handleCommand(line string) string {
+	fields := strings.Fields(line)
+	if len(fields) < 3 || len(fields) > 4 {
+		return "ERROR usage: CMD <type> <action> [arg]"
+	}
+	target, action, arg := strings.ToUpper(fields[1]), strings.ToLower(fields[2]), ""
+	if len(fields) == 4 {
+		arg = fields[3]
+	}
+
+	switch target {
+	case "MEDIA":
+		if err := sendMediaCommand(action, arg); err != nil {
+			return "ERROR " + err.Error()
+		}
+		return "OK media " + action
+	}
+	return "ERROR unknown command target"
 }
 
 func getInitialStates(conn net.Conn, infoType string) {

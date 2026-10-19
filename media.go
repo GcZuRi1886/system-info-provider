@@ -3,12 +3,16 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
 	"net/url"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/GcZuRi1886/system-info-provider/types"
@@ -20,6 +24,7 @@ const (
 	mprisPath        = dbus.ObjectPath("/org/mpris/MediaPlayer2")
 	mprisPlayerIface = "org.mpris.MediaPlayer2.Player"
 	mprisCallTimeout = 2 * time.Second
+	mprisNoTrack     = dbus.ObjectPath("/org/mpris/MediaPlayer2/TrackList/NoTrack")
 )
 
 // isMprisPlayerName reports whether a bus name belongs to a real MPRIS player.
@@ -40,7 +45,41 @@ type mprisPlayer struct {
 	canGoPrevious   bool
 	canPlay         bool
 	canPause        bool
+	canSeek         bool
 	lastActive      time.Time
+}
+
+// mediaCommand is a playback control request from a socket client
+type mediaCommand struct {
+	action string
+	arg    string
+	reply  chan error
+}
+
+var (
+	mediaCommands       = make(chan mediaCommand)
+	mediaListenerActive atomic.Bool
+)
+
+// sendMediaCommand hands a command to the media listener and waits for the result
+func sendMediaCommand(action, arg string) error {
+	if !mediaListenerActive.Load() {
+		return errors.New("media listener not running")
+	}
+	cmd := mediaCommand{action: action, arg: arg, reply: make(chan error, 1)}
+	// Covers both waiting for the listener and the D-Bus call it makes
+	timeout := time.After(2 * mprisCallTimeout)
+	select {
+	case mediaCommands <- cmd:
+	case <-timeout:
+		return errors.New("media listener busy")
+	}
+	select {
+	case err := <-cmd.reply:
+		return err
+	case <-timeout:
+		return errors.New("timed out waiting for player")
+	}
 }
 
 // Latest emitted media state, used for the initial snapshot on socket subscribe
@@ -81,6 +120,9 @@ func listenForMediaChanges(emit func(dataType string, data any)) {
 	c := make(chan *dbus.Signal, 32)
 	conn.Signal(c)
 
+	mediaListenerActive.Store(true)
+	defer mediaListenerActive.Store(false)
+
 	players := make(map[string]*mprisPlayer) // bus name → player
 	owners := make(map[string]string)        // unique name → bus name
 
@@ -97,10 +139,77 @@ func listenForMediaChanges(emit func(dataType string, data any)) {
 
 	lastJSON := emitMediaState(emit, players, nil)
 
-	for signalMsg := range c {
-		handleMediaSignal(conn, signalMsg, players, owners)
-		lastJSON = emitMediaState(emit, players, lastJSON)
+	for {
+		select {
+		case signalMsg, ok := <-c:
+			if !ok {
+				return
+			}
+			handleMediaSignal(conn, signalMsg, players, owners)
+			lastJSON = emitMediaState(emit, players, lastJSON)
+		case cmd := <-mediaCommands:
+			// No emit here: the player's own signals report the resulting state
+			cmd.reply <- handleMediaCommand(conn, players, cmd)
+		}
 	}
+}
+
+// handleMediaCommand runs a playback command on the currently displayed player
+func handleMediaCommand(conn *dbus.Conn, players map[string]*mprisPlayer, cmd mediaCommand) error {
+	p := selectActivePlayer(players)
+	if p == nil {
+		return errors.New("no active player")
+	}
+	if cmd.action != "seek" && cmd.arg != "" {
+		return fmt.Errorf("%s takes no argument", cmd.action)
+	}
+
+	var method string
+	var args []any
+	var supported bool
+	switch cmd.action {
+	case "play-pause":
+		method, supported = "PlayPause", p.canPause
+	case "play":
+		method, supported = "Play", p.canPlay
+	case "pause":
+		method, supported = "Pause", p.canPause
+	case "next":
+		method, supported = "Next", p.canGoNext
+	case "previous":
+		method, supported = "Previous", p.canGoPrevious
+	case "seek":
+		seconds, err := strconv.ParseFloat(cmd.arg, 64)
+		if err != nil || seconds < 0 {
+			return fmt.Errorf("invalid seek position %q", cmd.arg)
+		}
+		supported = p.canSeek
+		target := int64(seconds * 1e6)
+		if trackID, ok := metadataTrackID(p.metadata); ok {
+			method, args = "SetPosition", []any{trackID, target}
+		} else {
+			// Without a track id only relative seeking is possible
+			method, args = "Seek", []any{target - currentPosition(p)}
+		}
+	default:
+		return fmt.Errorf("unknown media action %q", cmd.action)
+	}
+	if !supported {
+		return fmt.Errorf("player %s does not support %s", strings.TrimPrefix(p.busName, mprisPrefix), cmd.action)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), mprisCallTimeout)
+	defer cancel()
+	return conn.Object(p.busName, mprisPath).
+		CallWithContext(ctx, mprisPlayerIface+"."+method, 0, args...).Err
+}
+
+// currentPosition estimates the playback position in microseconds
+func currentPosition(p *mprisPlayer) int64 {
+	if p.status == "Playing" && !p.positionUpdated.IsZero() {
+		return p.position + time.Since(p.positionUpdated).Microseconds()
+	}
+	return p.position
 }
 
 // addMprisPlayer registers a player and loads its current properties
@@ -235,6 +344,8 @@ func applyPlayerProps(p *mprisPlayer, props map[string]dbus.Variant) {
 			p.canPlay = getVariantBool(v)
 		case "CanPause":
 			p.canPause = getVariantBool(v)
+		case "CanSeek":
+			p.canSeek = getVariantBool(v)
 		}
 	}
 }
@@ -254,6 +365,22 @@ func refreshPosition(conn *dbus.Conn, p *mprisPlayer) {
 		p.position = pos
 		p.positionUpdated = time.Now()
 	}
+}
+
+// metadataTrackID returns the track id needed for SetPosition, if the player provides one
+func metadataTrackID(md map[string]dbus.Variant) (dbus.ObjectPath, bool) {
+	var id dbus.ObjectPath
+	switch val := md["mpris:trackid"].Value().(type) {
+	case dbus.ObjectPath:
+		id = val
+	case string:
+		// Some players wrongly send the track id as a string
+		id = dbus.ObjectPath(val)
+	}
+	if !id.IsValid() || id == mprisNoTrack {
+		return "", false
+	}
+	return id, true
 }
 
 // trackKey identifies the current track to detect track changes
@@ -308,6 +435,7 @@ func buildMediaInfo(p *mprisPlayer) *types.MediaInfo {
 		CanGoPrevious: p.canGoPrevious,
 		CanPlay:       p.canPlay,
 		CanPause:      p.canPause,
+		CanSeek:       p.canSeek,
 	}
 	if info.Title == "" {
 		// Untagged local files often only provide a URL

@@ -85,6 +85,18 @@ SUB MEDIA
 
 Upon subscribing, the client receives an initial state snapshot immediately, then live updates as they occur.
 
+Clients can also send commands with `CMD <TYPE> <action> [arg]`. Currently only `MEDIA` accepts commands; they act on the same player that the `media` stream reports:
+```
+CMD MEDIA play-pause
+CMD MEDIA play
+CMD MEDIA pause
+CMD MEDIA next
+CMD MEDIA previous
+CMD MEDIA seek 42.5
+```
+
+`seek` takes an absolute position in seconds. The server replies with `OK media <action>` on success or `ERROR <reason>` (e.g. `ERROR no active player`, or when the player's matching `can_*` flag is `false`). Commands don't produce a direct state message; the resulting change arrives through the normal `media` subscription.
+
 ## Output format
 All messages are JSON objects of the form:
 ```json
@@ -193,7 +205,8 @@ In stdout mode, each update overwrites the previous line (carriage return). In s
     "can_go_next": true,
     "can_go_previous": true,
     "can_play": true,
-    "can_pause": true
+    "can_pause": true,
+    "can_seek": true
   }
 }
 ```

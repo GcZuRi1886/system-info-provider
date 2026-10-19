@@ -16,4 +16,5 @@ type MediaInfo struct {
 	CanGoPrevious   bool    `json:"can_go_previous"`
 	CanPlay         bool    `json:"can_play"`
 	CanPause        bool    `json:"can_pause"`
+	CanSeek         bool    `json:"can_seek"`
 }
