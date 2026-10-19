@@ -181,7 +181,7 @@ In stdout mode, each update overwrites the previous line (carriage return). In s
   "type": "brightness",
   "data": {
     "current": 800,
-    "max": 1200,
+    "maximum": 1200,
     "percentage": 0.667
   }
 }

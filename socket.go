@@ -26,15 +26,16 @@ func broadcast(infoType string, data any) {
 		return
 	}
 
+	// Copy the connections so the lock is released before writing:
+	// writeToConn takes the write lock when it removes a broken client
 	subscribers.RLock()
-	defer subscribers.RUnlock()
-
-	conns, ok := subscribers.m[strings.ToUpper(infoType)]
-	if !ok {
-		return
+	conns := make([]net.Conn, 0, len(subscribers.m[strings.ToUpper(infoType)]))
+	for c := range subscribers.m[strings.ToUpper(infoType)] {
+		conns = append(conns, c)
 	}
+	subscribers.RUnlock()
 
-	for c := range conns {
+	for _, c := range conns {
 		writeToConn(c, msg)
 	}
 }
@@ -50,7 +51,7 @@ func marshalData(data any) (string, error) {
 func writeToConn(c net.Conn, msg string) {
 	_, err := c.Write([]byte(msg))
 	if err != nil {
-		fmt.Errorf("Write error: %v", err)
+		fmt.Printf("Write error: %v\n", err)
 		removeClientFromAllTypes(c)
 		c.Close()
 	}
@@ -176,8 +177,12 @@ func getInitialStates(conn net.Conn, infoType string) {
 			writeToConn(conn, msg)
 		}
 	case "BRIGHTNESS":
-		if current, err := readBrightnessInt("/sys/class/backlight"); err == nil {
-			_ = current
+		wrapper, err := getBrightnessState()
+		if err == nil {
+			msg, err := marshalData(wrapper)
+			if err == nil {
+				writeToConn(conn, msg)
+			}
 		}
 	}
 }

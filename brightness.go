@@ -33,6 +33,37 @@ func readBrightnessInt(path string) (int, error) {
 	return val, err
 }
 
+func newBrightnessWrapper(current, maximum int) types.Wrapper {
+	return types.Wrapper{
+		Type: "brightness",
+		Data: &types.BrightnessInfo{
+			Current:    current,
+			Maximum:    maximum,
+			Percentage: float64(current) / float64(maximum),
+		},
+	}
+}
+
+// getBrightnessState reads the current state of the first backlight device
+func getBrightnessState() (types.Wrapper, error) {
+	backlightPath, err := findBacklightPath()
+	if err != nil {
+		return types.Wrapper{}, err
+	}
+	maximum, err := readBrightnessInt(filepath.Join(backlightPath, "max_brightness"))
+	if err != nil {
+		return types.Wrapper{}, err
+	}
+	if maximum == 0 {
+		return types.Wrapper{}, fmt.Errorf("max_brightness of %s is 0", backlightPath)
+	}
+	current, err := readBrightnessInt(filepath.Join(backlightPath, "brightness"))
+	if err != nil {
+		return types.Wrapper{}, err
+	}
+	return newBrightnessWrapper(current, maximum), nil
+}
+
 func listenForBrightnessChanges(emit func(dataType string, data any)) {
 	backlightPath, err := findBacklightPath()
 	if err != nil {
@@ -66,14 +97,7 @@ func listenForBrightnessChanges(emit func(dataType string, data any)) {
 
 	// Emit initial state
 	if current, err := readBrightnessInt(brightnessFile); err == nil {
-		emit("brightness", types.Wrapper{
-			Type: "brightness",
-			Data: &types.BrightnessInfo{
-				Current: current,
-				Maximum: maximum,
-				Percentage:   float64(current) / float64(maximum),
-			},
-		})
+		emit("brightness", newBrightnessWrapper(current, maximum))
 	}
 
 	buf := make([]byte, unix.SizeofInotifyEvent*16)
@@ -93,13 +117,6 @@ func listenForBrightnessChanges(emit func(dataType string, data any)) {
 			continue
 		}
 
-		emit("brightness", types.Wrapper{
-			Type: "brightness",
-			Data: &types.BrightnessInfo{
-				Current: current,
-				Maximum: maximum,
-				Percentage:   float64(current) / float64(maximum),
-			},
-		})
+		emit("brightness", newBrightnessWrapper(current, maximum))
 	}
 }
