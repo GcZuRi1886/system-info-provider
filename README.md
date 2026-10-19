@@ -51,6 +51,8 @@ Supported `data_type` values:
 - `media` — currently playing media (MPRIS)
 - `socket` — start the Unix socket server and broadcast all streams
 
+To view the daemon's logs, use `logs [--follow]` (see [Logs](#logs)).
+
 ### Examples
 Stream system info to stdout:
 ```bash
@@ -96,6 +98,20 @@ CMD MEDIA seek 42.5
 ```
 
 `seek` takes an absolute position in seconds. The server replies with `OK media <action>` on success or `ERROR <reason>` (e.g. `ERROR no active player`, or when the player's matching `can_*` flag is `false`). Commands don't produce a direct state message; the resulting change arrives through the normal `media` subscription.
+
+## Logs
+Diagnostic messages go to stderr and are also appended to a log file shared by all running instances:
+```
+$XDG_STATE_HOME/system-info-provider/system-info-provider.log
+```
+
+Typically this resolves to `~/.local/state/system-info-provider/system-info-provider.log`. Each line is tagged with the mode of the process that wrote it, e.g. `[socket]`. When the file grows past 5 MB, it is moved to `system-info-provider.log.1` the next time an instance starts.
+
+Print the log, or keep streaming new lines from running processes (like `tail -f`; stop with Ctrl+C):
+```bash
+./system-info-provider logs
+./system-info-provider logs --follow   # or -f
+```
 
 ## Output format
 All messages are JSON objects of the form:

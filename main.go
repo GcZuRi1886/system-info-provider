@@ -38,17 +38,43 @@ func listenWorkspaceEvents(emit func(dataType string, data any)) {
 	provider.Listen(emit)
 }
 
+// runLogsCommand handles `logs [--follow|-f]`
+func runLogsCommand(args []string) {
+	follow := false
+	for _, a := range args {
+		switch a {
+		case "--follow", "-f":
+			follow = true
+		default:
+			fmt.Fprintf(os.Stderr, "Unknown logs option: %s\n", a)
+			os.Exit(1)
+		}
+	}
+	if err := printLogs(follow); err != nil {
+		fmt.Fprintf(os.Stderr, "Could not read logs at %s: %v\n", logPath, err)
+		os.Exit(1)
+	}
+}
+
 // ----- main -----
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
 	args := os.Args
+	if len(args) >= 2 && args[1] == "logs" {
+		runLogsCommand(args[2:])
+		return
+	}
+
 	if len(args) != 2 {
-		log.Fatalf("Usage: %s <data_type>", args[0])
-		log.Fatalf("data_type can be: workspace, system, bluetooth, brightness, media, socket")
+		fmt.Fprintf(os.Stderr, "Usage: %s <data_type>\n", args[0])
+		fmt.Fprintf(os.Stderr, "       %s logs [--follow|-f]\n", args[0])
+		fmt.Fprintln(os.Stderr, "data_type can be: workspace, system, bluetooth, brightness, media, socket")
+		os.Exit(1)
 	}
 	requestedData := args[1]
+	setupLogging(requestedData)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	switch requestedData {
 	case "workspace":

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"strings"
@@ -22,7 +23,7 @@ var subscribers = struct {
 func broadcast(infoType string, data any) {
 	msg, err := marshalData(data)
 	if err != nil {
-		fmt.Printf("Error marshaling data for broadcast: %v\n", err)
+		log.Printf("Error marshaling data for broadcast: %v", err)
 		return
 	}
 
@@ -51,7 +52,7 @@ func marshalData(data any) (string, error) {
 func writeToConn(c net.Conn, msg string) {
 	_, err := c.Write([]byte(msg))
 	if err != nil {
-		fmt.Printf("Write error: %v\n", err)
+		log.Printf("Write error: %v", err)
 		removeClientFromAllTypes(c)
 		c.Close()
 	}
@@ -66,7 +67,7 @@ func subscribe(c net.Conn, infoType string) {
 		subscribers.m[infoType] = make(map[net.Conn]bool)
 	}
 	
-	fmt.Println("Subscribing client to", infoType)
+	log.Println("Subscribing client to", infoType)
 
 	subscribers.m[infoType][c] = true
 }
@@ -91,7 +92,7 @@ func handleClient(conn net.Conn) {
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
-			fmt.Println("Client disconnected")
+			log.Println("Client disconnected")
 			removeClientFromAllTypes(conn)
 			return
 		}
@@ -202,18 +203,18 @@ func connectToSocket(socketPath string) (net.Listener, error) {
 		return nil, fmt.Errorf("failed to listen on unix socket: %w", err)
 	}
 
-	fmt.Printf("Server listening on %s\n", socketPath)
+	log.Printf("Server listening on %s", socketPath)
 
 	// Accept clients
 	go func() {
 		for {
 			conn, err := listener.Accept()
 			if err != nil {
-				fmt.Printf("Accept error: %v\n", err)
+				log.Printf("Accept error: %v", err)
 				continue
 			}
 
-			fmt.Println("Client connected")
+			log.Println("Client connected")
 			go handleClient(conn)
 		}
 	}()

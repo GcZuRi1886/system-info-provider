@@ -2,7 +2,7 @@ package main
 
 import (
 	"bufio"
-	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -46,7 +46,7 @@ func sysInfoLoop(emit func(dataType string, data any)) {
 
 		networkinfo, err := getNetworkInfo()
 		if err != nil {
-			fmt.Println("Error getting network info:", err)
+			log.Println("Error getting network info:", err)
 		}
 
 		systemInfo.Time = now
