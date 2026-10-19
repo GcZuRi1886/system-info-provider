@@ -13,7 +13,7 @@
       in {
         packages.default = pkgs.buildGoModule {
           pname = "system-info-provider";
-          version = "0.7.0";
+          version = "0.7.1";
 
           # Path to your main.go or module root
           src = ./.;
@@ -35,7 +35,10 @@
 
             echo "Welcome to the Go development environment for system-info-provider!"
 
-            exec zsh
+            # Don't replace the shell when loaded by direnv
+            if [ -z "$DIRENV_IN_ENVRC" ]; then
+              exec zsh
+            fi
             '';
         };
       }

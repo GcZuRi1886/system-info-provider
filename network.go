@@ -105,16 +105,18 @@ func dbmToPercent(dbm int) int {
 // bridges, veth pairs, dummy interfaces, etc.).
 func isVirtualInterface(name string) bool {
 	virtualPrefixes := []string{
-		"br-",    // Docker/Podman named bridge networks
-		"docker", // docker0 default bridge
-		"podman", // podman0 default bridge
-		"veth",   // virtual ethernet pairs (container side)
-		"virbr",  // libvirt/KVM bridges
-		"vnet",   // libvirt virtual NICs
-		"dummy",  // dummy interfaces
-		"lxcbr",  // LXC bridges
-		"lxdbr",  // LXD bridges
-		"vxlan",  // VXLAN overlay interfaces
+		"br-",     // Docker/Podman named bridge networks
+		"docker",  // docker0 default bridge
+		"podman",  // podman0 default bridge
+		"veth",    // virtual ethernet pairs (container side)
+		"virbr",   // libvirt/KVM bridges
+		"vnet",    // libvirt virtual NICs
+		"dummy",   // dummy interfaces
+		"lxcbr",   // LXC bridges
+		"lxdbr",   // LXD bridges
+		"vxlan",   // VXLAN overlay interfaces
+		"vboxnet", // VirtualBox host-only adapters
+		"vmnet",   // VMware host-only/NAT adapters
 	}
 	for _, prefix := range virtualPrefixes {
 		if strings.HasPrefix(name, prefix) {
@@ -267,7 +269,18 @@ func findPrimaryInterface() (net.Interface, string, error) {
 		}
 	}
 
-	// Second pass: fall back to WiFi interfaces (still excluding virtual)
+	// Second pass: WiFi (or any other non-virtual) interface with a live link
+	for _, iface := range active {
+		if isVirtualInterface(iface.Name) {
+			continue
+		}
+		ip := getIPAddress(iface)
+		if ip != "" && isConnected(iface.Name) {
+			return iface, ip, nil
+		}
+	}
+
+	// Last resort: any non-virtual interface with an IP, even without a link
 	for _, iface := range active {
 		if isVirtualInterface(iface.Name) {
 			continue
