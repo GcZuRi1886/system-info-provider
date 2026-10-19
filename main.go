@@ -46,7 +46,7 @@ func main() {
 	args := os.Args
 	if len(args) != 2 {
 		log.Fatalf("Usage: %s <data_type>", args[0])
-		log.Fatalf("data_type can be: workspace, system, bluetooth, socket")
+		log.Fatalf("data_type can be: workspace, system, bluetooth, brightness, media, socket")
 	}
 	requestedData := args[1]
 
@@ -62,6 +62,8 @@ func main() {
 		go listenForBluetoothChanges(emitToConsole)
 	case "brightness":
 		go listenForBrightnessChanges(emitToConsole)
+	case "media":
+		go listenForMediaChanges(emitToConsole)
 	case "socket":
 		_, err := connectToSocket(socketPath)
 		if err != nil {
@@ -71,6 +73,7 @@ func main() {
 		go listenWorkspaceEvents(broadcast)
 		go listenForBluetoothChanges(broadcast)
 		go listenForBrightnessChanges(broadcast)
+		go listenForMediaChanges(broadcast)
 	default:
 		log.Fatalf("Unknown requested data type: %s", requestedData)
 	}

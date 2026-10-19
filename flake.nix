@@ -13,7 +13,7 @@
       in {
         packages.default = pkgs.buildGoModule {
           pname = "system-info-provider";
-          version = "0.7.1";
+          version = "0.8.0";
 
           # Path to your main.go or module root
           src = ./.;

@@ -1,11 +1,12 @@
 # system-info-provider
 
-A small Go daemon that streams system, workspace, and Bluetooth state as JSON. It can print to stdout or act as a Unix socket server for multiple subscribers.
+A small Go daemon that streams system, workspace, Bluetooth, brightness, and media playback state as JSON. It can print to stdout or act as a Unix socket server for multiple subscribers.
 
 ## Features
 - Periodic system stats: time, CPU, memory, battery, and network (including Wi-Fi SSID, signal, speeds, and VPN)
 - Workspace updates for Hyprland or Mango WC
 - Bluetooth adapter + device state via BlueZ (D-Bus)
+- Currently playing media via MPRIS (D-Bus session bus)
 - Output as JSON to stdout or over a Unix socket
 
 ## Requirements
@@ -47,6 +48,7 @@ Supported `data_type` values:
 - `hyprland` — legacy alias for `workspace`
 - `bluetooth` — BlueZ adapter + device state
 - `brightness` — current screen brightness level
+- `media` — currently playing media (MPRIS)
 - `socket` — start the Unix socket server and broadcast all streams
 
 ### Examples
@@ -78,6 +80,7 @@ SUB SYSTEM
 SUB WORKSPACE
 SUB BLUETOOTH
 SUB BRIGHTNESS
+SUB MEDIA
 ```
 
 Upon subscribing, the client receives an initial state snapshot immediately, then live updates as they occur.
@@ -172,11 +175,39 @@ In stdout mode, each update overwrites the previous line (carriage return). In s
 }
 ```
 
+### `media` payload
+```json
+{
+  "type": "media",
+  "data": {
+    "active": true,
+    "player": "spotify",
+    "status": "Playing",
+    "title": "Song Title",
+    "artist": "Artist A, Artist B",
+    "album": "Album Name",
+    "art_url": "https://i.scdn.co/image/...",
+    "length": 215.4,
+    "position": 42.1,
+    "position_updated": 1792419316539,
+    "can_go_next": true,
+    "can_go_previous": true,
+    "can_play": true,
+    "can_pause": true
+  }
+}
+```
+
+When no player is running, `active` is `false` and the player fields are omitted.
+
+`length` and `position` are in seconds. Players do not signal position continuously, so `position` is only refreshed on play/pause, track changes, and seeks. `position_updated` is the Unix timestamp (ms) at which it was read; while `status` is `Playing`, clients can compute the current position as `position + (now - position_updated) / 1000`.
+
 ## Notes
 - Battery info is read from `/sys/class/power_supply/BAT0/uevent`.
 - Network info uses the first active interface with an IPv4 address.
 - VPN detection covers WireGuard, OpenVPN, ProtonVPN, NordVPN, Mullvad, and PPTP (by interface name pattern and `/sys` inspection).
 - In `socket` mode, clients receive an initial state snapshot on subscribe.
+- With several MPRIS players, the one that is playing is reported; otherwise the most recently active one. `playerctld` is ignored since it only proxies other players.
 
 ## Systemd
 Example user service to run the socket server:

@@ -143,6 +143,11 @@ func getInitialStates(conn net.Conn, infoType string) {
 				}
 			}
 		}
+	case "MEDIA":
+		msg, err := marshalData(getCachedMediaState())
+		if err == nil {
+			writeToConn(conn, msg)
+		}
 	case "BRIGHTNESS":
 		if current, err := readBrightnessInt("/sys/class/backlight"); err == nil {
 			_ = current
