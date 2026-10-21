@@ -25,6 +25,11 @@ const (
 	mprisPlayerIface = "org.mpris.MediaPlayer2.Player"
 	mprisCallTimeout = 2 * time.Second
 	mprisNoTrack     = dbus.ObjectPath("/org/mpris/MediaPlayer2/TrackList/NoTrack")
+
+	kdeconnectService     = "org.kde.kdeconnect"
+	kdeconnectDaemonPath  = dbus.ObjectPath("/modules/kdeconnect")
+	kdeconnectDeviceIface = "org.kde.kdeconnect.device"
+	kdeconnectPlayerName  = mprisPrefix + "kdeconnect."
 )
 
 // isMprisPlayerName reports whether a bus name belongs to a real MPRIS player.
@@ -47,6 +52,8 @@ type mprisPlayer struct {
 	canPause        bool
 	canSeek         bool
 	lastActive      time.Time
+	identity        string // e.g. "YouTube Music - Galaxy S23+" for KDE Connect
+	unreachable     bool   // KDE Connect player whose phone is no longer connected
 }
 
 // mediaCommand is a playback control request from a socket client
@@ -109,6 +116,8 @@ func listenForMediaChanges(emit func(dataType string, data any)) {
 		"type='signal',sender='org.freedesktop.DBus',interface='org.freedesktop.DBus',member='NameOwnerChanged',arg0namespace='org.mpris.MediaPlayer2'",
 		"type='signal',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged',path='/org/mpris/MediaPlayer2',arg0='org.mpris.MediaPlayer2.Player'",
 		"type='signal',interface='org.mpris.MediaPlayer2.Player',member='Seeked',path='/org/mpris/MediaPlayer2'",
+		// KDE Connect keeps a phone's players registered for a while after it disconnects
+		"type='signal',interface='org.kde.kdeconnect.device',member='reachableChanged'",
 	}
 	for _, rule := range rules {
 		if call := conn.BusObject().Call("org.freedesktop.DBus.AddMatch", 0, rule); call.Err != nil {
@@ -136,6 +145,7 @@ func listenForMediaChanges(emit func(dataType string, data any)) {
 			addMprisPlayer(conn, players, owners, name, "")
 		}
 	}
+	updateKDEConnectReachability(conn, players)
 
 	lastJSON := emitMediaState(emit, players, nil)
 
@@ -235,6 +245,15 @@ func addMprisPlayer(conn *dbus.Conn, players map[string]*mprisPlayer, owners map
 
 	applyPlayerProps(p, props)
 	refreshPosition(conn, p)
+	if strings.HasPrefix(busName, kdeconnectPlayerName) {
+		var v dbus.Variant
+		err := conn.Object(busName, mprisPath).
+			CallWithContext(ctx, "org.freedesktop.DBus.Properties.Get", 0, "org.mpris.MediaPlayer2", "Identity").
+			Store(&v)
+		if err == nil {
+			p.identity = getVariantString(v)
+		}
+	}
 	if p.status == "Playing" {
 		p.lastActive = time.Now()
 	}
@@ -270,7 +289,13 @@ func handleMediaSignal(conn *dbus.Conn, signalMsg *dbus.Signal, players map[stri
 		}
 		if newOwner != "" {
 			addMprisPlayer(conn, players, owners, name, newOwner)
+			if strings.HasPrefix(name, kdeconnectPlayerName) {
+				updateKDEConnectReachability(conn, players)
+			}
 		}
+
+	case kdeconnectDeviceIface + ".reachableChanged":
+		updateKDEConnectReachability(conn, players)
 
 	case "org.freedesktop.DBus.Properties.PropertiesChanged":
 		if len(signalMsg.Body) < 2 {
@@ -396,11 +421,65 @@ func trackKey(md map[string]dbus.Variant) string {
 	return metadataString(md, "xesam:title") + "\x00" + metadataArtist(md)
 }
 
+// updateKDEConnectReachability marks KDE Connect players whose device is not reachable.
+// Players are matched to devices by the " - <device name>" suffix of their identity.
+func updateKDEConnectReachability(conn *dbus.Conn, players map[string]*mprisPlayer) {
+	var kdePlayers []*mprisPlayer
+	for _, p := range players {
+		if strings.HasPrefix(p.busName, kdeconnectPlayerName) {
+			kdePlayers = append(kdePlayers, p)
+		}
+	}
+	if len(kdePlayers) == 0 {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), mprisCallTimeout)
+	defer cancel()
+	var ids []string
+	err := conn.Object(kdeconnectService, kdeconnectDaemonPath).
+		CallWithContext(ctx, "org.kde.kdeconnect.daemon.devices", 0, true, false).
+		Store(&ids)
+	if err != nil {
+		// Without daemon info, show the players rather than hiding them
+		log.Printf("Media: could not list reachable KDE Connect devices: %v", err)
+		for _, p := range kdePlayers {
+			p.unreachable = false
+		}
+		return
+	}
+
+	var names []string
+	for _, id := range ids {
+		var v dbus.Variant
+		err := conn.Object(kdeconnectService, kdeconnectDaemonPath+"/devices/"+dbus.ObjectPath(id)).
+			CallWithContext(ctx, "org.freedesktop.DBus.Properties.Get", 0, kdeconnectDeviceIface, "name").
+			Store(&v)
+		if err == nil {
+			names = append(names, getVariantString(v))
+		}
+	}
+
+	for _, p := range kdePlayers {
+		// Without an identity the device is unknown, so only hide it when no phone is connected
+		reachable := p.identity == "" && len(names) > 0
+		for _, name := range names {
+			if strings.HasSuffix(p.identity, " - "+name) {
+				reachable = true
+				break
+			}
+		}
+		p.unreachable = !reachable
+	}
+}
+
 // selectActivePlayer prefers a playing player, then the most recently active one
 func selectActivePlayer(players map[string]*mprisPlayer) *mprisPlayer {
 	list := make([]*mprisPlayer, 0, len(players))
 	for _, p := range players {
-		list = append(list, p)
+		if !p.unreachable {
+			list = append(list, p)
+		}
 	}
 	if len(list) == 0 {
 		return nil

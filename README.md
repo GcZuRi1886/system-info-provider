@@ -85,7 +85,7 @@ SUB BRIGHTNESS
 SUB MEDIA
 ```
 
-Upon subscribing, the client receives an initial state snapshot immediately, then live updates as they occur.
+The server confirms each subscription with `OK subscribed to <TYPE>` (`HYPRLAND` is accepted as an alias for `WORKSPACE`). For `WORKSPACE`, `BLUETOOTH`, `BRIGHTNESS`, and `MEDIA`, the client then receives an initial state snapshot immediately, followed by live updates as they occur. `SYSTEM` has no snapshot; its first message arrives with the next periodic update (every 3 seconds).
 
 Clients can also send commands with `CMD <TYPE> <action> [arg]`. Currently only `MEDIA` accepts commands; they act on the same player that the `media` stream reports:
 ```
@@ -227,16 +227,15 @@ In stdout mode, each update overwrites the previous line (carriage return). In s
 }
 ```
 
-When no player is running, `active` is `false` and the player fields are omitted.
+When no player is available, `active` is `false`, the string fields (`player`, `status`, `title`, ...) and `position_updated` are omitted, and the numeric and `can_*` fields are `0`/`false`.
 
 `length` and `position` are in seconds. Players do not signal position continuously, so `position` is only refreshed on play/pause, track changes, and seeks. `position_updated` is the Unix timestamp (ms) at which it was read; while `status` is `Playing`, clients can compute the current position as `position + (now - position_updated) / 1000`.
 
 ## Notes
 - Battery info is read from `/sys/class/power_supply/BAT0/uevent`.
-- Network info uses the first active interface with an IPv4 address.
+- Network info uses the first active, non-virtual interface with an IPv4 address, preferring wired over Wi-Fi and interfaces with a live link.
 - VPN detection covers WireGuard, OpenVPN, ProtonVPN, NordVPN, Mullvad, and PPTP (by interface name pattern and `/sys` inspection).
-- In `socket` mode, clients receive an initial state snapshot on subscribe.
-- With several MPRIS players, the one that is playing is reported; otherwise the most recently active one. `playerctld` is ignored since it only proxies other players.
+- With several MPRIS players, the one that is playing is reported; otherwise the most recently active one. `playerctld` is ignored since it only proxies other players. KDE Connect players are also ignored while their phone is not reachable, since KDE Connect keeps them registered for a while after the phone disconnects.
 
 ## Systemd
 Example user service to run the socket server:
