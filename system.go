@@ -31,9 +31,11 @@ func sysInfoLoop(emit func(dataType string, data any)) {
 		avgPercent, _ := cpu.Percent(0, false)
 
 		// Memory usage
-		vm, _ := mem.VirtualMemory()
-		totalMem := vm.Total
-		usedMem := vm.Used
+		var totalMem, usedMem uint64
+		if vm, err := mem.VirtualMemory(); err == nil {
+			totalMem = vm.Total
+			usedMem = vm.Used
+		}
 
 		// Update battery info
 		batteryInfo := getBatteryInfo()
@@ -51,11 +53,18 @@ func sysInfoLoop(emit func(dataType string, data any)) {
 
 		systemInfo.Time = now
 		systemInfo.CPUPerCore = cpuUsage
-		systemInfo.CPUAverage = avgPercent[0]
+		if len(avgPercent) > 0 {
+			systemInfo.CPUAverage = avgPercent[0]
+		}
 		systemInfo.MemoryUsed = int(usedMem)
 		systemInfo.MemoryTotal = int(totalMem)
 		systemInfo.Battery = *batteryInfo
-		systemInfo.Network = *networkinfo
+		// getNetworkInfo returns nil when no interface is up (e.g. right after resume)
+		if networkinfo != nil {
+			systemInfo.Network = *networkinfo
+		} else {
+			systemInfo.Network = types.NetworkInfo{}
+		}
 		emit(systemInfoWrapper.Type, systemInfoWrapper)
 
 		time.Sleep(3 * time.Second)
